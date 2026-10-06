@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 MIN_GAP_MS = 70             # at most ~14 changes a second (measured: ~60 ms per acknowledged write)
+LATE_MS = 500               # a change this late (e.g. Bluetooth reconnecting) shifts the rest of the timeline
 MAX_DEPTH = 8
 MAX_STEPS = 500             # steps as written, not as played
 MAX_MS = 7 * 24 * 3600 * 1000
@@ -262,6 +263,10 @@ class Player:
     Plays steps on a timeline. self.t is when the current step is *due*; we only actually sleep
     just before sending a change. Due times come from the timeline, not from when the previous
     send finished, so small delays never add up.
+
+    A big delay is different: if a change goes out more than LATE_MS late (say the bulb took
+    6 s to reconnect), rushing to catch up would squash the next part of the pattern. Instead the
+    whole timeline, loop time limits included, shifts back by the delay (self.shift).
     """
     light: Light
     clock: Any = field(default_factory=RealClock)
@@ -269,6 +274,7 @@ class Player:
     t: float = 0.0
     last_send: float = -math.inf
     changes_sent: int = 0
+    shift: float = 0.0  # seconds the timeline has been pushed back by late sends
 
     async def play(self, steps: list[Step], limit_ms: float | None = None) -> None:
         self.t = self.clock.now()
@@ -277,7 +283,7 @@ class Player:
             await self._steps(steps, deadline)
         except _TimeUp:
             pass
-        await self.clock.sleep_until(self.t)  # let a final wait or fade run its course
+        await self.clock.sleep_until(self.t + self.shift)  # let a final wait or fade run its course
 
     def _pick(self, r: Range | None) -> int | None:
         return None if r is None else self.rng.randint(*r)
@@ -304,9 +310,12 @@ class Player:
         if self.t >= deadline:
             self.t = deadline
             raise _TimeUp(deadline)
-        await self.clock.sleep_until(self.t)
+        await self.clock.sleep_until(self.t + self.shift)
         fade = self._pick(step.fade_ms)
         await self.light.apply(step.on, step.color, self._pick(step.brightness), fade)
+        late = self.clock.now() - (self.t + self.shift)
+        if late > LATE_MS / 1000:
+            self.shift += late  # don't rush to catch up: push the rest of the pattern back
         self.last_send, self.changes_sent = self.t, self.changes_sent + 1
         self._advance(fade or 0, deadline)  # a fade holds the pattern until it's done
 

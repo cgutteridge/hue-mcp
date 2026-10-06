@@ -148,3 +148,32 @@ def test_cancel_stops_immediately_even_mid_wait():
             await task
         return light.log
     assert [c for _, _, c, _, _ in asyncio.run(scenario())] == ["red"]
+
+
+def test_a_slow_send_shifts_the_timeline_instead_of_squashing_it():
+    class SlowFirstLight(RecordingLight):
+        async def apply(self, *args):
+            if not self.log:
+                self.clock.t += 6.0  # e.g. the first send waits for Bluetooth to reconnect
+            await super().apply(*args)
+
+    clock = FakeClock()
+    light = SlowFirstLight(clock)
+    data = [{"loop": [{"color": "red"}, {"wait_ms": 2000}, {"color": "blue"}, {"wait_ms": 2000}],
+             "for_ms": 8000}]
+    asyncio.run(Player(light, clock, random.Random(0)).play(parse(data)))
+    times = [t for t, *_ in light.log]
+    assert times == [6.0, 8.0, 10.0, 12.0]  # every gap still 2 s, not rushed
+    assert clock.now() == 14.0              # and the 8 s limit still gave 8 s of pattern
+
+
+def test_small_delays_do_not_shift_the_timeline():
+    class SlightlySlowLight(RecordingLight):
+        async def apply(self, *args):
+            self.clock.t += 0.06  # a normal acknowledged write
+            await super().apply(*args)
+
+    clock = FakeClock()
+    light = SlightlySlowLight(clock)
+    asyncio.run(Player(light, clock).play(parse([{"color": "red"}, {"wait_ms": 1000}, {"color": "blue"}])))
+    assert [round(t, 2) for t, *_ in light.log] == [0.06, 1.06]  # each due on time; no drift added
