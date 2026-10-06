@@ -146,6 +146,20 @@ def check_description(description: Any) -> str:
     return description
 
 
+KEY_ORDER = ["on", "color", "brightness", "fade_ms", "wait_ms", "loop", "times", "for_ms", "min", "max"]
+
+
+def _ordered(obj: Any) -> Any:
+    """Keys in a fixed, readable order (on, color, brightness, fade_ms...; min before max),
+    whatever order they arrived in: some clients send them sorted alphabetically."""
+    if isinstance(obj, list):
+        return [_ordered(item) for item in obj]
+    if isinstance(obj, dict):
+        rank = {k: i for i, k in enumerate(KEY_ORDER)}
+        return {k: _ordered(obj[k]) for k in sorted(obj, key=lambda k: (rank.get(k, len(rank)), k))}
+    return obj
+
+
 def format_file(name: str, description: str, steps: list[Any]) -> str:
     """Pretty JSON for humans: one step per line, loops indented."""
     def fmt(obj: Any, depth: int) -> str:
@@ -156,5 +170,6 @@ def format_file(name: str, description: str, steps: list[Any]) -> str:
             rest = {k: v for k, v in obj.items() if k != "loop"}
             return '{"loop": ' + fmt(obj["loop"], depth) + (", " + json.dumps(rest)[1:-1] if rest else "") + "}"
         return json.dumps(obj)
+    steps = _ordered(steps)
     return ('{\n  "name": %s,\n  "description": %s,\n  "pattern": %s\n}\n'
             % (json.dumps(name), json.dumps(description), fmt(steps, 1)))

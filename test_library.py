@@ -93,3 +93,13 @@ def test_unreadable_files_are_skipped(lib):
     lib.user_dir.mkdir()
     (lib.user_dir / "broken.json").write_text("{not json")
     assert [e.name for e in lib.list()] == ["storm"]
+
+
+def test_saved_keys_are_in_readable_order(lib):
+    scrambled = [{"on": True, "brightness": 10, "color": "red"},
+                 {"times": {"max": 4, "min": 2}, "loop": [{"wait_ms": {"max": 9, "min": 1}}]}]
+    lib.save("tidy", "Tidy.", scrambled)
+    text = (lib.user_dir / "tidy.json").read_text()
+    assert '{"on": true, "color": "red", "brightness": 10}' in text
+    assert '{"wait_ms": {"min": 1, "max": 9}}' in text
+    assert '], "times": {"min": 2, "max": 4}}' in text
