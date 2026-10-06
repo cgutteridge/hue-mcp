@@ -152,6 +152,10 @@ Privacy & Security → Bluetooth). Logs: `~/Library/Logs/Claude/mcp-server-hue.l
 | wait | `{"wait_ms": 5000}` | |
 | loop | `{"loop": [steps], "times": 3}` | `times`: a count, `{"min", "max"}` or `"forever"`; and/or `for_ms`: a time limit. With both, whichever comes first |
 
+- **Black is a colour:** `"color": "black"` (or `"brightness": 0`) is dark, and with `fade_ms` it fades
+  to black. Any other colour or brightness lights the bulb again, fading in if asked, so a pattern
+  never needs `"on"`. (A bulb can't emit black, so dark is sent as power-off with the bulb's own
+  fade; it remembers its colour and brightness for when it comes back.)
 - **Random values:** `wait_ms`, `fade_ms`, `brightness` and `times` also take `{"min": a, "max": b}`
   (inclusive), picked afresh each time the step runs.
 - **Time limits cut through:** a loop's `for_ms` stops everything inside it, even an inner loop
@@ -223,7 +227,8 @@ uv run play.py path/to/some.json           # a pattern file that isn't in the li
 ```
 
 To drive something else (WLED, a smart plug, a terminal UI), copy a class from `lights.py`.
-Tests: `uv run --with pytest pytest` (they use a fake clock, so hours of pattern take milliseconds).
+Tests: `uv run --with pytest --with bleak --with webcolors pytest` (no bulb needed; pattern tests use a
+fake clock, so hours of pattern take milliseconds).
 
 ## Things worth noticing in the code
 

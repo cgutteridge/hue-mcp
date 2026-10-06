@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 import pattern
-from hue_bulb import parse_color
+from hue_bulb import check_color
 from library import Library, LibraryError
 from lights import LampLight, SimLight
 
@@ -54,7 +54,7 @@ async def main() -> None:
 
     description, data = load(args.file)
     try:
-        steps = pattern.parse(data, check_color=parse_color)
+        steps = pattern.parse(data, check_color=check_color)
     except pattern.PatternError as err:
         sys.exit(f"{args.file}: {err}")
     if args.fast and args.light != "sim":

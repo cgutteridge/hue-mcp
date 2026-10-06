@@ -83,12 +83,32 @@ def parse_color(color: str) -> tuple[str, bytes]:
     return COLOR_CHAR, round(x * 65535).to_bytes(2, "little") + round(y * 65535).to_bytes(2, "little")
 
 
+def is_black(color: str) -> bool:
+    """Is this colour black ("black", "#000", "#000000")? Black isn't a colour a bulb can show:
+    it means *no light*, which on a bulb is off. plan_writes turns it into power off."""
+    color = color.strip().lower()
+    if KELVIN_PATTERN.match(color):
+        return False
+    try:
+        return webcolors.hex_to_rgb(color if color.startswith("#") else webcolors.name_to_hex(color)) == (0, 0, 0)
+    except ValueError:
+        return False
+
+
+def check_color(color: str) -> None:
+    """Raise ValueError unless this is a colour we can play: anything parse_color accepts, or black."""
+    if not is_black(color):
+        parse_color(color)
+
+
 def percent_to_raw(percent: int) -> int:
-    return round(MIN_BRIGHT + (MAX_BRIGHT - MIN_BRIGHT) * percent / 100)
+    """1-100 % -> the bulb's 1-254. (0 % means dark, which is power off: see plan_writes.)"""
+    percent = max(1, percent)
+    return round(MIN_BRIGHT + (MAX_BRIGHT - MIN_BRIGHT) * (percent - 1) / 99)
 
 
 def raw_to_percent(raw: int) -> int:
-    return round((raw - MIN_BRIGHT) * 100 / (MAX_BRIGHT - MIN_BRIGHT))
+    return round(1 + (raw - MIN_BRIGHT) * 99 / (MAX_BRIGHT - MIN_BRIGHT))
 
 
 # ── 2. Whole-state records ─────────────────────────────────────────────────────
@@ -105,14 +125,30 @@ RECORD_FOR_CHAR = {POWER_CHAR: REC_POWER, BRIGHTNESS_CHAR: REC_BRIGHTNESS,
 
 
 def plan_writes(on: bool | None, color: str | None, brightness: int | None) -> list[tuple[str, bytes]]:
-    """Turn a request into (characteristic, bytes) pairs. Raises ValueError for a bad colour,
-    so callers can validate everything before touching the bulb."""
+    """
+    Turn a request into (characteristic, bytes) pairs. Raises ValueError for a bad colour,
+    so callers can validate everything before touching the bulb.
+
+    The rules that make "black" work like any other colour:
+    - black, or brightness 0, means dark: the bulb is switched off (with a fade, if one is given,
+      it fades out). It keeps its colour and brightness for when it comes back.
+    - any other colour, or a brightness above 0, means "show this": the bulb is switched on,
+      unless on=false says otherwise (then the values are set ready for next time).
+    """
+    dark = (color is not None and is_black(color)) or brightness == 0
+    shows_something = (color is not None and not is_black(color)) or (brightness or 0) > 0
+    if dark or on is False:
+        power = False
+    elif on or shows_something:
+        power = True
+    else:
+        power = None  # nothing to say about power
     writes: list[tuple[str, bytes]] = []
-    if on is not None:
-        writes.append((POWER_CHAR, b"\x01" if on else b"\x00"))
-    if color is not None:
+    if power is not None:
+        writes.append((POWER_CHAR, b"\x01" if power else b"\x00"))
+    if color is not None and not is_black(color):
         writes.append(parse_color(color))
-    if brightness is not None:
+    if brightness:  # 0 is dark (handled above), so the remembered level is left alone
         writes.append((BRIGHTNESS_CHAR, bytes([percent_to_raw(brightness)])))
     return writes
 

@@ -27,7 +27,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 import pattern as patterns  # 'pattern' is the tool's argument name
-from hue_bulb import MAX_FADE_MS, HueBulb, parse_color
+from hue_bulb import MAX_FADE_MS, HueBulb, check_color
 from hue_config import load_address
 from library import Library, LibraryError
 
@@ -107,14 +107,17 @@ async def set_hue(
     on: Annotated[bool | None, Field(description="Switch the bulb on (true) or off (false)")] = None,
     color: Annotated[str | None, Field(
         description='A CSS colour name ("tomato", "teal"), a hex value ("#ff8800"), '
-                    'or a shade of white in kelvin ("2700K" warm to "6500K" cool)')] = None,
-    brightness: Annotated[int | None, Field(ge=0, le=100, description="Brightness, 0-100 percent")] = None,
+                    'a shade of white in kelvin ("2700K" warm to "6500K" cool), or "black" for dark')] = None,
+    brightness: Annotated[int | None, Field(ge=0, le=100, description=
+        "Brightness, 1-100 percent; 0 means dark")] = None,
     fade_ms: Annotated[int | None, Field(ge=0, le=MAX_FADE_MS, description=
         "How long the bulb takes to fade to the new values, in ms (100 ms steps, up to ~1 h 49 min). "
         "0 is instant; leave out for the bulb's own ~0.4 s fade.")] = None,
 ) -> HueResult:
     """
     Change the real Philips Hue bulb in the user's room. Any field you leave out stays as it is.
+    Black (or brightness 0) means dark: the bulb switches off, fading out if fade_ms is given, and
+    remembers its colour and brightness. Any other colour or brightness switches it on (fading in).
     For a slow change, use fade_ms (e.g. 600000 fades over 10 minutes); the bulb runs the fade itself.
     Stops any pattern that's playing.
     """
@@ -142,6 +145,8 @@ Anything new (another pattern, set_hue, stop_hue_pattern) replaces it immediatel
 The pattern is a list of steps. Each step is ONE of:
 - a change: any of "on", "color", "brightness" (as in set_hue), plus optional "fade_ms".
   A fade holds the pattern until it finishes. Without fade_ms the pattern moves straight on.
+  "black" or brightness 0 is dark (a fade to black fades out); any other colour or brightness
+  lights the bulb again, so "on" is rarely needed.
 - a wait: {"wait_ms": 5000}
 - a loop: {"loop": [steps], "times": 3} or "times": "forever", and/or "for_ms": 60000 (a time
   limit; it also stops any loop inside it, even mid-wait). With both, whichever comes first.
@@ -188,7 +193,7 @@ async def play_hue_pattern(
         except LibraryError as err:
             raise ToolError(f"Nothing played: {err}")
     try:
-        steps = patterns.parse(pattern, check_color=parse_color)
+        steps = patterns.parse(pattern, check_color=check_color)
     except patterns.PatternError as err:
         raise ToolError(f"Nothing played: {err}")
     stopped = await Playing.stop()
@@ -249,7 +254,7 @@ def save_hue_pattern(
     patterns; built-in ones are never changed.
     """
     try:
-        return library.save(name, description, pattern, replace, check_color=parse_color)
+        return library.save(name, description, pattern, replace, check_color=check_color)
     except (LibraryError, patterns.PatternError) as err:
         raise ToolError(f"Not saved: {err}")
 
