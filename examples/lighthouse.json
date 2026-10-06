@@ -1,0 +1,13 @@
+{
+  "name": "lighthouse",
+  "description": "Night-blue dark, then a slow beam sweeps up to bright and away again, every 10 s. Runs until stopped.",
+  "pattern": [
+    {"on": true, "color": "#1b2a4a", "brightness": 3, "fade_ms": 1500},
+    {"loop": [
+      {"wait_ms": 4500},
+      {"color": "3000K", "brightness": 100, "fade_ms": 2500},
+      {"wait_ms": 300},
+      {"color": "#1b2a4a", "brightness": 3, "fade_ms": 2500}
+    ], "times": "forever"}
+  ]
+}

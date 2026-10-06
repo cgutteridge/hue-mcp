@@ -1,0 +1,17 @@
+{
+  "name": "someones-home",
+  "description": "TV-like flicker in cool blues, with scene cuts, so an empty house looks lived in. Runs until stopped.",
+  "pattern": [
+    {"on": true, "color": "#8fb4ff", "brightness": 40},
+    {"loop": [
+      {"loop": [
+        {"brightness": {"min": 30, "max": 60}, "fade_ms": {"min": 100, "max": 600}},
+        {"wait_ms": {"min": 200, "max": 2500}}
+      ], "times": {"min": 3, "max": 10}},
+      {"color": "#b8c8ff", "brightness": {"min": 45, "max": 75}, "fade_ms": 0},
+      {"wait_ms": {"min": 500, "max": 4000}},
+      {"color": "#7fa0e6", "brightness": {"min": 25, "max": 50}, "fade_ms": 0},
+      {"wait_ms": {"min": 300, "max": 3000}}
+    ], "times": "forever"}
+  ]
+}

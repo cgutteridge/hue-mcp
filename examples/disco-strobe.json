@@ -1,0 +1,17 @@
+{
+  "name": "disco-strobe",
+  "description": "3 s dark, 3 s of white strobe (~6 flashes a second), for a minute, then warm white. WARNING: fast flashing; not for anyone with photosensitive epilepsy.",
+  "pattern": [
+    {"loop": [
+      {"on": false, "fade_ms": 0},
+      {"wait_ms": 3000},
+      {"loop": [
+        {"on": true, "color": "6500K", "brightness": 100, "fade_ms": 0},
+        {"wait_ms": 40},
+        {"on": false, "fade_ms": 0},
+        {"wait_ms": 90}
+      ], "for_ms": 3000}
+    ], "for_ms": 60000},
+    {"on": true, "color": "3500K", "brightness": 50, "fade_ms": 1000}
+  ]
+}

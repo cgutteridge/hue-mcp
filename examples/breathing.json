@@ -1,0 +1,14 @@
+{
+  "name": "breathing",
+  "description": "Three slow teal breaths, a pause, and again, for 10 minutes. Shows: nested loops.",
+  "pattern": [
+    {"on": true, "color": "teal", "brightness": 10},
+    {"loop": [
+      {"loop": [
+        {"brightness": 70, "fade_ms": 4000},
+        {"brightness": 10, "fade_ms": 6000}
+      ], "times": 3},
+      {"wait_ms": 5000}
+    ], "for_ms": 600000}
+  ]
+}

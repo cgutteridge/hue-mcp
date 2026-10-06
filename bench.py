@@ -3,13 +3,14 @@
 # dependencies = ["bleak>=3,<4", "webcolors>=25"]
 # ///
 """
-Speed test for the Hue bulb over Bluetooth: how fast can we change it, and can the
+Step 6: speed test. How fast can we change the bulb over Bluetooth, and can the
 bulb do fades itself? Run from this folder with:   uv run bench.py
 
 Takes about a minute. The bulb will flicker, change colour and fade a few times, then go
 back to how it was. Results print as a summary and are saved to bench-results.json.
 
-Close nothing: it's fine if Claude's normal hue server is also connected.
+It's fine if Claude's hue server is connected at the same time: macOS shares the link.
+What it found on an LCA001 is in the README ("What we found on the bulb").
 """
 
 import asyncio
@@ -21,10 +22,8 @@ from pathlib import Path
 from bleak import BleakClient
 
 from hue_bulb import parse_color, percent_to_raw, raw_to_percent
-from hue_config import (BRIGHTNESS_CHAR, COLOR_CHAR, POWER_CHAR,
+from hue_config import (BRIGHTNESS_CHAR, COLOR_CHAR, POWER_CHAR, STATE_CHAR,
                         TEMPERATURE_CHAR, load_address)
-
-STATE_CHAR = "932c32bd-0007-47a2-835a-a8d455b859dd"  # whole state as type-length-value records
 results: dict = {}
 
 
@@ -110,11 +109,11 @@ async def test_default_fade(client: BleakClient) -> None:
 
 async def test_native_transition(client: BleakClient) -> None:
     """
-    Unverified guess from community reverse-engineering: characteristic 0007 accepts the same
-    type-length-value records it reports, plus type 5 = transition time. We try two plausible
-    units (100 ms steps, and milliseconds) asking for a 3-second fade, and watch what happens.
+    The experiment that found bulb-side fades: write the same type-length-value records 0007
+    reports, plus type 5 = transition time, trying two plausible units (100 ms steps, and
+    milliseconds) for a 3-second fade, and watch what happens. (100 ms steps won.)
     """
-    print("\n5. Can the bulb do a long fade itself? (probing characteristic 0007; unverified)")
+    print("\n5. Can the bulb do a long fade itself? (probing characteristic 0007)")
     try:
         raw = bytes(await client.read_gatt_char(STATE_CHAR))
         results["state_char_read_hex"] = raw.hex()
@@ -144,13 +143,13 @@ async def test_native_transition(client: BleakClient) -> None:
 
 
 async def test_stepped_fade(client: BleakClient) -> None:
-    print("\n6. Software fade: 2 s from 10% to 90%, one write per step as fast as the link allows")
+    print("\n6. Software fade: 2 s from 10% to 90%, one acknowledged write per step")
     await bright(client, 10)
     await asyncio.sleep(1)
     duration, stamps, start = 2.0, [], now()
     while (elapsed := now() - start) < duration:
         pct = round(10 + 80 * elapsed / duration)
-        await bright(client, pct, response=False)
+        await bright(client, pct)  # acked: unacked writes just pile up in macOS's queue
         stamps.append(now() - start)
     await bright(client, 90)
     gaps = [b - a for a, b in zip(stamps, stamps[1:])]

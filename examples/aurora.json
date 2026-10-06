@@ -1,0 +1,17 @@
+{
+  "name": "aurora",
+  "description": "Northern lights: slow, uneven drifts between green, teal and violet at low brightness. Runs until stopped.",
+  "pattern": [
+    {"on": true, "color": "#2bff88", "brightness": 20, "fade_ms": 3000},
+    {"loop": [
+      {"color": "#2bff88", "brightness": {"min": 15, "max": 35}, "fade_ms": {"min": 4000, "max": 9000}},
+      {"wait_ms": {"min": 0, "max": 2000}},
+      {"color": "#18d6c8", "brightness": {"min": 10, "max": 30}, "fade_ms": {"min": 4000, "max": 9000}},
+      {"wait_ms": {"min": 0, "max": 2000}},
+      {"color": "#2bff88", "brightness": {"min": 20, "max": 40}, "fade_ms": {"min": 4000, "max": 9000}},
+      {"wait_ms": {"min": 0, "max": 2000}},
+      {"color": "#9b5cff", "brightness": {"min": 10, "max": 25}, "fade_ms": {"min": 5000, "max": 10000}},
+      {"wait_ms": {"min": 0, "max": 3000}}
+    ], "times": "forever"}
+  ]
+}

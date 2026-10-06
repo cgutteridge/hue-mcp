@@ -1,0 +1,10 @@
+{
+  "name": "sunrise",
+  "description": "A 20-minute sunrise: deep red glow to warm orange to bright daylight. Shows: long fades the bulb runs by itself.",
+  "pattern": [
+    {"on": true, "color": "darkred", "brightness": 1, "fade_ms": 0},
+    {"color": "orangered", "brightness": 30, "fade_ms": 600000},
+    {"color": "3000K", "brightness": 70, "fade_ms": 480000},
+    {"color": "5000K", "brightness": 100, "fade_ms": 120000}
+  ]
+}

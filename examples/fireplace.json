@@ -1,0 +1,17 @@
+{
+  "name": "fireplace",
+  "description": "A crackling fire: orange flicker with occasional flare-ups as a log catches. Runs until stopped.",
+  "pattern": [
+    {"on": true, "color": "#ff7b22", "brightness": 35, "fade_ms": 1500},
+    {"loop": [
+      {"loop": [
+        {"color": "#ff8a2b", "brightness": {"min": 28, "max": 50}, "fade_ms": {"min": 300, "max": 900}},
+        {"wait_ms": {"min": 0, "max": 400}},
+        {"color": "#ff6a1c", "brightness": {"min": 22, "max": 42}, "fade_ms": {"min": 300, "max": 900}},
+        {"wait_ms": {"min": 0, "max": 400}}
+      ], "times": {"min": 4, "max": 12}},
+      {"color": "#ffa040", "brightness": {"min": 65, "max": 85}, "fade_ms": {"min": 150, "max": 350}},
+      {"wait_ms": {"min": 200, "max": 700}}
+    ], "times": "forever"}
+  ]
+}

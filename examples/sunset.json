@@ -1,0 +1,12 @@
+{
+  "name": "sunset",
+  "description": "A 30-minute wind-down for bedtime: warm white to amber to a dim red ember, then off.",
+  "pattern": [
+    {"on": true, "color": "3500K", "brightness": 70, "fade_ms": 2000},
+    {"color": "2700K", "brightness": 50, "fade_ms": 600000},
+    {"color": "2000K", "brightness": 25, "fade_ms": 600000},
+    {"color": "#ff4500", "brightness": 5, "fade_ms": 540000},
+    {"brightness": 0, "fade_ms": 60000},
+    {"on": false}
+  ]
+}

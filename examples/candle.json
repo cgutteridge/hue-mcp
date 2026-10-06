@@ -1,0 +1,11 @@
+{
+  "name": "candle",
+  "description": "A flickering candle, until stopped. Shows: random brightness, fades and waits.",
+  "pattern": [
+    {"on": true, "color": "2000K", "brightness": 40},
+    {"loop": [
+      {"brightness": {"min": 25, "max": 55}, "fade_ms": {"min": 100, "max": 400}},
+      {"wait_ms": {"min": 0, "max": 300}}
+    ], "times": "forever"}
+  ]
+}

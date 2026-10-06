@@ -1,0 +1,14 @@
+{
+  "name": "red-green",
+  "description": "Red for 5 s, fade to green over 1 s, hold 1 s; repeat for a minute, then off. Shows: changes, waits, fades, a time-limited loop.",
+  "pattern": [
+    {"on": true, "brightness": 80},
+    {"loop": [
+      {"color": "red", "fade_ms": 0},
+      {"wait_ms": 5000},
+      {"color": "green", "fade_ms": 1000},
+      {"wait_ms": 1000}
+    ], "for_ms": 60000},
+    {"on": false}
+  ]
+}

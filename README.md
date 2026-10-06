@@ -16,11 +16,14 @@ The tools have the same shape, so you can compare the two: same MCP layer, diffe
 
 | Kind | Name      | What it does                                                               |
 |------|-----------|----------------------------------------------------------------------------|
-| tool | `get_hue` | Read the bulb's on/off state, colour and brightness (read-only)            |
-| tool | `set_hue` | Change any of `on`, `color` (CSS name, hex or e.g. `"2700K"`), `brightness` (0–100) |
+| tool | `get_hue` | Read the bulb's on/off state, colour and brightness, and any pattern playing (read-only) |
+| tool | `set_hue` | Change any of `on`, `color` (CSS name, hex or e.g. `"2700K"`), `brightness` (0–100), with an optional `fade_ms` the bulb runs itself |
+| tool | `play_hue_pattern` | Play a timed pattern of changes, waits, fades and loops in the background ([Patterns](#patterns)) |
+| tool | `stop_hue_pattern` | Stop it                                                         |
+| resource | `hue://patterns`, `hue://patterns/{name}` | The example patterns, for Claude to read and adapt |
 
-`mcp-lamp` also has `start_lamp` (there's no window to open here) and a resource. Adding a
-`hue://state` resource would be a good first exercise.
+`mcp-lamp` also has `start_lamp` (there's no window to open here). Adding a `hue://state`
+resource would be a good first exercise.
 
 ## How it was built: the step scripts
 
@@ -37,6 +40,8 @@ each file and sets up a throwaway environment, so there's no install step.
 | 4b   | `brightness.py`  | Converting 0–100 % to the bulb's 1–254 (and the fade that caught us out) |
 | 4c   | `color_probe.py`, `color.py` | Decoding unknown bytes; colour temperature and CIE xy colour |
 | 5    | `server.py` + `hue_bulb.py` | The MCP server                                             |
+| 6    | `bench.py`       | Measuring: how fast can we change the bulb, and can it fade by itself? (It can.) |
+| 7    | `pattern.py`, `play.py` | Timed patterns, playable on the bulb, the on-screen lamp or a simulation |
 
 ## What we found on the bulb
 
@@ -54,7 +59,24 @@ Light-control service `932c32bd-0000-47a2-835a-a8d455b859dd`. Characteristics ar
 | 0004 | colour temperature | 2 bytes little-endian, in mireds (1,000,000 ÷ kelvin), 153–500      |
 | 0005 | colour             | 4 bytes: x then y, 2 bytes LE each, 1.0 = 65535. `ffffffff` in white mode |
 | 0001 | capabilities       | type-length-value records, incl. the mired range                    |
-| 0007, 1005 | whole state  | type-length-value: 1 power, 2 brightness, 3 temperature, 4 xy       |
+| 0007 | whole state        | type-length-value: 1 power, 2 brightness, 3 temperature, 4 xy. **Writable**, see below |
+| 1005 | whole state        | the same records, read-only                                         |
+
+`bench.py` measured (LCA001, macOS, one connection kept open):
+
+| What | Result |
+|---|---|
+| Connecting | ~6 s, which is why the server keeps one connection open |
+| One acknowledged write | ~60 ms, so ~15 changes a second at most |
+| One read | ~90 ms. Reading 0007 gets the whole state in one go |
+| The bulb's own fade | ~0.36 s for any change |
+| **Writing 0007** | One packet changes several things at once. Add a record of **type 5, 2 bytes LE: the fade time in 100 ms units**, and the bulb fades smoothly by itself: a requested 3 s fade took 2.9 s. (Sending 3000, meaning milliseconds, gave a 5-minute fade.) |
+| Timing done on the Mac | Steps 400 ms apart landed 40–60 ms late (one write), with no build-up |
+
+Colour and white fades work the same way (checked by reading back mid-fade: red to blue over
+20 s passed through pinks and violets on schedule; 2200 K to 6500 K over 12 s read 3226 K halfway,
+an even fade in mireds). If a bulb refuses 0007 writes, `hue_bulb.py` falls back to writing the
+characteristics one by one (without custom fades).
 
 The settings for your setup live in `hue.toml` (just the bulb's address). It's specific to your
 Mac, so git ignores it; `hue.toml.example` is the template. The protocol constants
@@ -110,17 +132,83 @@ Privacy & Security → Bluetooth). Logs: `~/Library/Logs/Claude/mcp-server-hue.l
 
 - "Turn my Hue bulb on."
 - "Make it a calm ocean blue at 40%."
-- "Set it to a warm 2700K reading light."
-- "Slowly cycle through the colours of the rainbow."
+- "Fade to a warm 2700K reading light over two minutes."
+- "Slowly cycle through the colours of the rainbow, forever."
+- "Make it flicker like a candle." / "Play the sunrise example."
+- "Red for five seconds, fade to green over one, hold a second; do that for a minute, then off."
 - "What colour is the bulb right now?"
+
+## Patterns
+
+`play_hue_pattern` takes a list of steps. A step is **one** of:
+
+| Step | Looks like | Notes |
+|---|---|---|
+| change | `{"color": "red", "brightness": 80, "fade_ms": 1000}` | any of `on`, `color`, `brightness` (as in `set_hue`), optional `fade_ms`. A fade holds the pattern until it's done; without `fade_ms` the pattern moves straight on |
+| wait | `{"wait_ms": 5000}` | |
+| loop | `{"loop": [steps], "times": 3}` | `times`: a count, `{"min", "max"}` or `"forever"`; and/or `for_ms`: a time limit. With both, whichever comes first |
+
+- **Random values:** `wait_ms`, `fade_ms`, `brightness` and `times` also take `{"min": a, "max": b}`
+  (inclusive), picked afresh each time the step runs.
+- **Time limits cut through:** a loop's `for_ms` stops everything inside it, even an inner loop
+  halfway through a wait, and the pattern carries on after that loop.
+- **New replaces old:** another pattern, `set_hue` or `stop_hue_pattern` stops the current pattern
+  at once.
+- **Safe by construction:** the whole pattern is checked before anything plays, and errors say which
+  step is wrong (`pattern[0].loop[2].color: "gren" is not a CSS colour name…`). Every loop must take
+  some time, and the player sends at most one change every 70 ms whatever the pattern says.
+
+```json
+[
+  {"loop": [
+    {"color": "red"},
+    {"wait_ms": 5000},
+    {"color": "green", "fade_ms": 1000},
+    {"wait_ms": 1000}
+  ], "for_ms": 60000},
+  {"on": false}
+]
+```
+
+That's red for 5 s, a 1 s fade to green, a 1 s hold, repeated for a minute (stopping exactly at
+60 s, wherever it's got to), then off. More in [`examples/`](examples):
+
+| Pattern | What it is | Shows off |
+|---|---|---|
+| `sunrise`, `sunset` | 20-minute wake-up; 30-minute wind-down ending in off | long fades the bulb runs itself |
+| `box-breathing`, `breathing` | breathing guides | exact timing; nested loops |
+| `pomodoro` | 4 × (25 min focus, 5 min break), then a gold blink | a practical timer |
+| `candle`, `fireplace` | flickering flame; fire with flare-ups | random brightness, fades and waits |
+| `aurora` | slow green/teal/violet drifts | colour fades |
+| `lighthouse` | a beam sweeping past every 10 s | a simple steady rhythm |
+| `forest-railway` | gloomy carriage, hard-cut sun through the trees | random bursts of random length |
+| `thunderstorm` | gloom with single/double/triple lightning | the same, harsher |
+| `someones-home` | TV-like flicker for an empty house | scene cuts among slow drift |
+| `seasick`, `party`, `red-green` | rolling whites; colour hops; red/green for a minute | random timing; random counts; time limits |
+| `disco-strobe` | 3 s dark, 3 s strobe, for a minute | the speed limit (~6 flashes/s). **Fast flashing: not for anyone with photosensitive epilepsy** |
+
+### Playing patterns without Claude, or without a bulb
+
+`pattern.py` knows nothing about MCP or Bluetooth: it plays on anything with an
+`async apply(on, color, brightness, fade_ms)` method. `play.py` uses that:
+
+```bash
+uv run play.py examples/candle.json                 # simulated: prints a timeline, in real time
+uv run play.py examples/pomodoro.json --fast        # simulated, instantly
+uv run play.py examples/breathing.json --light lamp # the on-screen lamp from ../mcp-lamp
+uv run play.py examples/sunrise.json --light hue    # the real bulb
+```
+
+To drive something else (WLED, a smart plug, a terminal UI), copy a class from `lights.py`.
+Tests: `uv run --with pytest pytest` (they use a fake clock, so hours of pattern take milliseconds).
 
 ## Things worth noticing in the code
 
 Everything from `mcp-lamp` applies (stdout is sacred, descriptions are the prompt, schemas
 validate for you, annotations are hints). New here:
 
-- **The MCP layer is thin.** `server.py` is ~90 lines; all the Bluetooth work is in
-  `hue_bulb.py`, which knows nothing about MCP. You could reuse it in a CLI or a notebook.
+- **The MCP layer is thin.** All the Bluetooth work is in `hue_bulb.py` and all the pattern logic in
+  `pattern.py`; neither knows about MCP, so `play.py` reuses both from the command line.
 - **Python type hints are the schema.** In the Python SDK, `brightness: Annotated[int | None,
   Field(ge=0, le=100)]` does what a zod schema does in TypeScript. Returning a pydantic model
   gives the tool an output schema and structured results.
@@ -128,6 +216,12 @@ validate for you, annotations are hints). New here:
   anything is sent to the bulb, so Claude can correct itself and retry.
 - **Real hardware is slow and flaky.** The server keeps one connection open between calls and
   reconnects and retries once if it drops. A lock stops two calls talking over each other.
+- **Nested input without a nested schema.** Patterns nest (loops hold steps). Recursive JSON
+  schemas are handled unevenly by MCP clients, so `play_hue_pattern` declares just "a list of
+  objects", explains the format in its description, and `pattern.parse` does the real checking with
+  errors that point at the exact step. Schema for shape, code for meaning.
+- **Long jobs in the background.** A pattern can run for hours, so the tool starts it and returns at
+  once with how long it will take; `get_hue` reports progress, and any error that stopped it.
 - **Friendly in, friendly out.** `get_hue` reports colours in the same formats `set_hue` accepts,
   so the model can read a value and send it straight back.
 - **SDK v2 naming.** Older tutorials say `FastMCP`. In `mcp` 2.x it's
@@ -138,9 +232,14 @@ validate for you, annotations are hints). New here:
 ```
 hue.toml.example    template for hue.toml, your bulb's address (hue.toml itself is git-ignored)
 hue_config.py       loads hue.toml; the protocol's UUIDs
-hue_bulb.py         colour conversions + the Bluetooth connection (no MCP)
+hue_bulb.py         colour conversions, whole-state records + the Bluetooth connection (no MCP)
 server.py           the MCP server (stdio)
-scan.py … color.py  the step-by-step scripts above
+pattern.py          the pattern format, checking and player (no MCP, no Bluetooth)
+lights.py           other things a pattern can play on: a simulation, the mcp-lamp window
+play.py             play a pattern file from the command line
+examples/           example patterns (also served to Claude as hue://patterns/…)
+test_pattern.py     tests for pattern.py
+scan.py … bench.py  the step-by-step scripts above
 CLAUDE.md           the original brief
 ```
 

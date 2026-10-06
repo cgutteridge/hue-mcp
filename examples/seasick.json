@@ -1,0 +1,26 @@
+{
+  "name": "seasick",
+  "description": "A minute of rolling between candle orange and cool daylight, with lurching brightness and random timing. Then warm white.",
+  "pattern": [
+    {"on": true, "color": "2000K", "brightness": 60, "fade_ms": 300},
+    {"loop": [
+      {"color": "2700K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "3500K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "4500K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "6500K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "4500K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "3500K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "2700K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}},
+      {"color": "2000K", "brightness": {"min": 30, "max": 90}, "fade_ms": {"min": 400, "max": 1200}},
+      {"wait_ms": {"min": 0, "max": 400}}
+    ], "for_ms": 60000},
+    {"color": "3500K", "brightness": 50, "fade_ms": 1500}
+  ]
+}

@@ -1,9 +1,10 @@
 """
 Everything about talking to the bulb, with no MCP in sight.
 
-Two parts:
+Three parts:
 1. Colour conversions: friendly colours (CSS names, hex, "2700K") <-> the bulb's bytes.
-2. HueBulb: one long-lived Bluetooth connection, reconnecting when it drops.
+2. Whole-state records: one packet for several changes plus a fade time (see hue_config.py).
+3. HueBulb: one long-lived Bluetooth connection, reconnecting when it drops.
 
 server.py is a thin MCP layer on top of this, the same split as mcp-lamp
 (where the "device" was a state file plus a signal).
@@ -17,7 +18,7 @@ from dataclasses import dataclass
 import webcolors
 from bleak import BleakClient
 
-from hue_config import BRIGHTNESS_CHAR, COLOR_CHAR, POWER_CHAR, TEMPERATURE_CHAR
+from hue_config import BRIGHTNESS_CHAR, COLOR_CHAR, POWER_CHAR, STATE_CHAR, TEMPERATURE_CHAR
 
 log = logging.getLogger("hue-mcp")  # logging goes to stderr, never stdout
 
@@ -90,7 +91,50 @@ def raw_to_percent(raw: int) -> int:
     return round((raw - MIN_BRIGHT) * 100 / (MAX_BRIGHT - MIN_BRIGHT))
 
 
-# ── 2. The bulb ────────────────────────────────────────────────────────────────
+# ── 2. Whole-state records ─────────────────────────────────────────────────────
+# STATE_CHAR (0007) takes and reports [type, length, value...] records, so one write can
+# change power, colour and brightness together *and* tell the bulb how long to fade.
+
+REC_POWER, REC_BRIGHTNESS, REC_MIREDS, REC_XY, REC_FADE = 1, 2, 3, 4, 5
+FADE_UNIT_MS = 100                          # the fade time is counted in 100 ms steps
+MAX_FADE_MS = 65535 * FADE_UNIT_MS          # 2 bytes: just under 1 h 50 min
+DEFAULT_FADE_MS = 400                       # the bulb's own fade when none is given (measured ~360 ms)
+
+RECORD_FOR_CHAR = {POWER_CHAR: REC_POWER, BRIGHTNESS_CHAR: REC_BRIGHTNESS,
+                   TEMPERATURE_CHAR: REC_MIREDS, COLOR_CHAR: REC_XY}
+
+
+def plan_writes(on: bool | None, color: str | None, brightness: int | None) -> list[tuple[str, bytes]]:
+    """Turn a request into (characteristic, bytes) pairs. Raises ValueError for a bad colour,
+    so callers can validate everything before touching the bulb."""
+    writes: list[tuple[str, bytes]] = []
+    if on is not None:
+        writes.append((POWER_CHAR, b"\x01" if on else b"\x00"))
+    if color is not None:
+        writes.append(parse_color(color))
+    if brightness is not None:
+        writes.append((BRIGHTNESS_CHAR, bytes([percent_to_raw(brightness)])))
+    return writes
+
+
+def encode_records(writes: list[tuple[str, bytes]], fade_ms: int | None = None) -> bytes:
+    packet = b"".join(bytes([RECORD_FOR_CHAR[char], len(data)]) + data for char, data in writes)
+    if fade_ms is not None:
+        steps = max(0, min(65535, round(fade_ms / FADE_UNIT_MS)))
+        packet += bytes([REC_FADE, 2]) + steps.to_bytes(2, "little")
+    return packet
+
+
+def decode_records(raw: bytes) -> dict[int, bytes]:
+    records, i = {}, 0
+    while i + 2 <= len(raw):
+        kind, length = raw[i], raw[i + 1]
+        records[kind] = raw[i + 2:i + 2 + length]
+        i += 2 + length
+    return records
+
+
+# ── 3. The bulb ────────────────────────────────────────────────────────────────
 
 @dataclass
 class HueState:
@@ -135,36 +179,62 @@ class HueBulb:
                 return await operation(await self._connected())
 
     async def get_state(self) -> HueState:
+        """Read the whole state in one go from STATE_CHAR (~90 ms), or piece by piece if that fails."""
         async def read(client: BleakClient) -> HueState:
-            power = await client.read_gatt_char(POWER_CHAR)
-            bright = await client.read_gatt_char(BRIGHTNESS_CHAR)
-            xy = bytes(await client.read_gatt_char(COLOR_CHAR))
-            if xy == XY_NOT_SET:  # white mode: report the colour temperature instead
-                mireds = int.from_bytes(await client.read_gatt_char(TEMPERATURE_CHAR), "little")
-                color = f"{round(1_000_000 / mireds)}K"
-            else:
-                color = xy_to_hex(int.from_bytes(xy[0:2], "little") / 65535,
-                                  int.from_bytes(xy[2:4], "little") / 65535)
-            return HueState(on=power[0] == 1, color=color, brightness=raw_to_percent(bright[0]))
+            records = decode_records(bytes(await client.read_gatt_char(STATE_CHAR)))
+            if REC_POWER in records and REC_BRIGHTNESS in records:
+                xy = records.get(REC_XY)
+                if xy and xy != XY_NOT_SET:
+                    color = xy_to_hex(int.from_bytes(xy[0:2], "little") / 65535,
+                                      int.from_bytes(xy[2:4], "little") / 65535)
+                    return HueState(records[REC_POWER][0] == 1, color, raw_to_percent(records[REC_BRIGHTNESS][0]))
+                if REC_MIREDS in records:
+                    color = f"{round(1_000_000 / int.from_bytes(records[REC_MIREDS], 'little'))}K"
+                    return HueState(records[REC_POWER][0] == 1, color, raw_to_percent(records[REC_BRIGHTNESS][0]))
+            return await self._read_separately(client)
 
         return await self._run(read)
 
-    async def set_state(self, on: bool | None, color: str | None, brightness: int | None) -> HueState:
-        # Validate everything before touching the bulb, so a bad colour changes nothing.
-        writes: list[tuple[str, bytes]] = []
-        if on is not None:
-            writes.append((POWER_CHAR, b"\x01" if on else b"\x00"))
-        if color is not None:
-            writes.append(parse_color(color))
-        if brightness is not None:
-            writes.append((BRIGHTNESS_CHAR, bytes([percent_to_raw(brightness)])))
+    async def _read_separately(self, client: BleakClient) -> HueState:
+        power = await client.read_gatt_char(POWER_CHAR)
+        bright = await client.read_gatt_char(BRIGHTNESS_CHAR)
+        xy = bytes(await client.read_gatt_char(COLOR_CHAR))
+        if xy == XY_NOT_SET:  # white mode: report the colour temperature instead
+            mireds = int.from_bytes(await client.read_gatt_char(TEMPERATURE_CHAR), "little")
+            color = f"{round(1_000_000 / mireds)}K"
+        else:
+            color = xy_to_hex(int.from_bytes(xy[0:2], "little") / 65535,
+                              int.from_bytes(xy[2:4], "little") / 65535)
+        return HueState(on=power[0] == 1, color=color, brightness=raw_to_percent(bright[0]))
+
+    async def apply(self, on: bool | None = None, color: str | None = None,
+                    brightness: int | None = None, fade_ms: int | None = None) -> None:
+        """
+        Send a change in one packet, with an optional fade the bulb runs by itself.
+        Doesn't wait or read back, so patterns can call it on a tight schedule.
+        """
+        writes = plan_writes(on, color, brightness)  # raises before anything is sent
+        if not writes:
+            return
+        packet = encode_records(writes, fade_ms)
 
         async def write(client: BleakClient) -> None:
-            for char, data in writes:
-                await client.write_gatt_char(char, data, response=True)
+            try:
+                await client.write_gatt_char(STATE_CHAR, packet, response=True)
+            except Exception as err:  # an older bulb or firmware: change things one by one, no custom fade
+                log.warning("whole-state write refused (%s); writing separately", err)
+                for char, data in writes:
+                    await client.write_gatt_char(char, data, response=True)
 
         await self._run(write)
-        await asyncio.sleep(0.5)  # the bulb fades to new values; let it settle before reading back
+
+    async def set_state(self, on: bool | None = None, color: str | None = None,
+                        brightness: int | None = None, fade_ms: int | None = None) -> HueState:
+        """Apply a change, wait for a short fade to finish, and report the state."""
+        await self.apply(on, color, brightness, fade_ms)
+        fade = DEFAULT_FADE_MS if fade_ms is None else fade_ms
+        if fade <= 1500:  # longer fades: report where it is now rather than keep the caller waiting
+            await asyncio.sleep(fade / 1000)
         return await self.get_state()
 
     async def disconnect(self) -> None:

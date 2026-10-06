@@ -1,0 +1,19 @@
+{
+  "name": "party",
+  "description": "Random-length bursts of colour hops, until stopped. Shows: random loop counts.",
+  "pattern": [
+    {"on": true, "brightness": 90},
+    {"loop": [
+      {"loop": [
+        {"color": "magenta", "fade_ms": 150},
+        {"wait_ms": 200},
+        {"color": "cyan", "fade_ms": 150},
+        {"wait_ms": 200},
+        {"color": "yellow", "fade_ms": 150},
+        {"wait_ms": 200}
+      ], "times": {"min": 2, "max": 6}},
+      {"color": "purple", "fade_ms": 1500},
+      {"wait_ms": {"min": 1000, "max": 4000}}
+    ], "times": "forever"}
+  ]
+}

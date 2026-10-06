@@ -1,0 +1,17 @@
+{
+  "name": "pomodoro",
+  "description": "Four rounds of 25 min focus (cool white) and 5 min break (soft green), then a gold blink to say you're done. Shows: a counted loop of long waits, then a short one.",
+  "pattern": [
+    {"loop": [
+      {"on": true, "color": "5000K", "brightness": 80, "fade_ms": 2000},
+      {"wait_ms": 1500000},
+      {"color": "mediumseagreen", "brightness": 40, "fade_ms": 2000},
+      {"wait_ms": 300000}
+    ], "times": 4},
+    {"color": "gold", "brightness": 80},
+    {"loop": [
+      {"brightness": 20, "fade_ms": 300},
+      {"brightness": 80, "fade_ms": 300}
+    ], "times": 5}
+  ]
+}
