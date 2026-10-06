@@ -1,13 +1,17 @@
 {
   "name": "box-breathing",
-  "description": "Five minutes of box breathing: brighten 4 s (in), hold 4 s, dim 4 s (out), hold 4 s. Then back to warm white.",
+  "description": "Five minutes of box breathing: blue brightens 4 s (breathe in), soft pink hold 4 s, blue dims 4 s (breathe out), dim pink hold 4 s. Then warm white.",
   "pattern": [
     {"on": true, "color": "#5b8fd6", "brightness": 10, "fade_ms": 2000},
     {"loop": [
-      {"brightness": 80, "fade_ms": 4000},
-      {"wait_ms": 4000},
-      {"brightness": 10, "fade_ms": 4000},
-      {"wait_ms": 4000}
+      {"brightness": 80, "fade_ms": 3900},
+      {"color": "#ffa8c8", "fade_ms": 100},
+      {"wait_ms": 3900},
+      {"color": "#5b8fd6", "fade_ms": 100},
+      {"brightness": 10, "fade_ms": 3900},
+      {"color": "#ffa8c8", "fade_ms": 100},
+      {"wait_ms": 3900},
+      {"color": "#5b8fd6", "fade_ms": 100}
     ], "for_ms": 300000},
     {"color": "3500K", "brightness": 50, "fade_ms": 3000}
   ]
