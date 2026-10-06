@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+_to_delete/
+
+# Local settings (bulb address); see hue.toml.example
+hue.toml

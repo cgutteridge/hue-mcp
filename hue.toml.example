@@ -1,0 +1,7 @@
+# Settings for your Hue bulb. Copy this file to hue.toml (which git ignores) and fill it in:
+#   cp hue.toml.example hue.toml
+#
+# The address comes from `uv run scan.py`. On macOS it's a per-Mac ID, not the bulb's
+# real MAC address: it differs on every Mac and changes if the bulb is factory reset.
+# The HUE_ADDRESS environment variable, if set, overrides this file.
+address = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
