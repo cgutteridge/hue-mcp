@@ -7,6 +7,9 @@ _to_delete/
 # Local settings (bulb address); see hue.toml.example
 hue.toml
 
+# Your own saved patterns (see library.py)
+my-patterns/
+
 # bench.py output (measurements from your own bulb)
 bench-results.json
 .pytest_cache/

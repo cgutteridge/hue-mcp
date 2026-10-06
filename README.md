@@ -18,9 +18,13 @@ The tools have the same shape, so you can compare the two: same MCP layer, diffe
 |------|-----------|----------------------------------------------------------------------------|
 | tool | `get_hue` | Read the bulb's on/off state, colour and brightness, and any pattern playing (read-only) |
 | tool | `set_hue` | Change any of `on`, `color` (CSS name, hex or e.g. `"2700K"`), `brightness` (0–100), with an optional `fade_ms` the bulb runs itself |
-| tool | `play_hue_pattern` | Play a timed pattern of changes, waits, fades and loops in the background ([Patterns](#patterns)) |
+| tool | `play_hue_pattern` | Play a saved pattern by name, or a timed pattern of changes, waits, fades and loops given as steps, in the background ([Patterns](#patterns)) |
 | tool | `stop_hue_pattern` | Stop it                                                         |
-| resource | `hue://patterns`, `hue://patterns/{name}` | The example patterns, for Claude to read and adapt |
+| tool | `list_hue_patterns` | The saved patterns: name, one-line description, built-in or yours (read-only) |
+| tool | `get_hue_pattern` | One saved pattern's steps (read-only) |
+| tool | `save_hue_pattern` | Save a pattern under a name; `replace: true` to update one ([Library](#the-pattern-library)) |
+| tool | `delete_hue_pattern` | Delete one of your saved patterns (marked destructive) |
+| resource | `hue://patterns`, `hue://patterns/{name}` | The same library, as documents you can attach to a chat |
 
 `mcp-lamp` also has `start_lamp` (there's no window to open here). Adding a `hue://state`
 resource would be a good first exercise.
@@ -171,7 +175,7 @@ Privacy & Security → Bluetooth). Logs: `~/Library/Logs/Claude/mcp-server-hue.l
 ```
 
 That's red for 5 s, a 1 s fade to green, a 1 s hold, repeated for a minute (stopping exactly at
-60 s, wherever it's got to), then off. More in [`examples/`](examples):
+60 s, wherever it's got to), then off. The built-in patterns in [`patterns/`](patterns):
 
 | Pattern | What it is | Shows off |
 |---|---|---|
@@ -187,16 +191,35 @@ That's red for 5 s, a 1 s fade to green, a 1 s hold, repeated for a minute (stop
 | `seasick`, `party`, `red-green` | rolling whites; colour hops; red/green for a minute | random timing; random counts; time limits |
 | `disco-strobe` | 3 s dark, 3 s strobe, for a minute | the speed limit (~6 flashes/s). **Fast flashing: not for anyone with photosensitive epilepsy** |
 
+### The pattern library
+
+Patterns can be saved by name with a one-line description, then played by name. Ask Claude to
+"save that as forest-railway", "play thunderstorm", "what patterns are there?" or "make a slower
+version of lighthouse".
+
+- **Built-in patterns** live in `patterns/` and are part of the project (in git). The tools can read
+  and play them but never change them.
+- **Your patterns** live in `my-patterns/`, which git ignores, like `hue.toml`. Everything you save
+  goes there. Set `HUE_MY_PATTERNS` (in the server's `env` in Claude's config) to keep them somewhere
+  else, such as a synced folder.
+- **Same name, yours wins.** Saving your own `candle` (it needs `replace: true`) takes the built-in's
+  place; delete yours and the built-in one is back.
+- **Saving checks first**, with the same step-by-step errors as playing, so a saved pattern always
+  plays. Names are lowercase words joined by hyphens (`forest-railway`), up to 40 characters.
+- Each pattern is a small readable JSON file (one step per line), so editing one by hand or adding a
+  new built-in is just a file in the right folder.
+
 ### Playing patterns without Claude, or without a bulb
 
 `pattern.py` knows nothing about MCP or Bluetooth: it plays on anything with an
 `async apply(on, color, brightness, fade_ms)` method. `play.py` uses that:
 
 ```bash
-uv run play.py examples/candle.json                 # simulated: prints a timeline, in real time
-uv run play.py examples/pomodoro.json --fast        # simulated, instantly
-uv run play.py examples/breathing.json --light lamp # the on-screen lamp from ../mcp-lamp
-uv run play.py examples/sunrise.json --light hue    # the real bulb
+uv run play.py candle                      # simulated: prints a timeline, in real time
+uv run play.py pomodoro --fast             # simulated, instantly
+uv run play.py breathing --light lamp      # the on-screen lamp from ../mcp-lamp
+uv run play.py sunrise --light hue         # the real bulb
+uv run play.py path/to/some.json           # a pattern file that isn't in the library
 ```
 
 To drive something else (WLED, a smart plug, a terminal UI), copy a class from `lights.py`.
@@ -220,6 +243,11 @@ validate for you, annotations are hints). New here:
   schemas are handled unevenly by MCP clients, so `play_hue_pattern` declares just "a list of
   objects", explains the format in its description, and `pattern.parse` does the real checking with
   errors that point at the exact step. Schema for shape, code for meaning.
+- **Tools, not resources, for things the model needs.** The library is also offered as resources
+  (`hue://patterns/…`), but in Claude Desktop resources are things *you* attach to a chat: the model
+  can't open them by itself. Anything Claude should be able to look up mid-conversation has to be a
+  tool, so `list_hue_patterns` and `get_hue_pattern` exist, and playing by name means the steps never
+  have to be pasted into a call.
 - **Long jobs in the background.** A pattern can run for hours, so the tool starts it and returns at
   once with how long it will take; `get_hue` reports progress, and any error that stopped it.
 - **Friendly in, friendly out.** `get_hue` reports colours in the same formats `set_hue` accepts,
@@ -237,8 +265,10 @@ server.py           the MCP server (stdio)
 pattern.py          the pattern format, checking and player (no MCP, no Bluetooth)
 lights.py           other things a pattern can play on: a simulation, the mcp-lamp window
 play.py             play a pattern file from the command line
-examples/           example patterns (also served to Claude as hue://patterns/…)
-test_pattern.py     tests for pattern.py
+library.py          the pattern library: built-in patterns/ + your my-patterns/ (no MCP)
+patterns/           the built-in patterns
+my-patterns/        your saved patterns (created on first save; git-ignored)
+test_*.py           tests for pattern.py and library.py
 scan.py … bench.py  the step-by-step scripts above
 CLAUDE.md           the original brief
 ```

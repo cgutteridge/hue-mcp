@@ -11,14 +11,14 @@ Never print() here; log to stderr instead (the logging module does by default).
 
 Built with the MCP Python SDK v2, where the class once called FastMCP is MCPServer.
 get_hue / set_hue mirror mcp-lamp. play_hue_pattern / stop_hue_pattern add timed patterns
-(the format and the player live in pattern.py, which knows nothing about MCP).
+(the format and the player live in pattern.py), and the *_hue_pattern(s) library tools keep
+named patterns (library.py). Neither of those files knows anything about MCP.
 """
 
 import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
@@ -29,12 +29,13 @@ from pydantic import BaseModel, Field
 import pattern as patterns  # 'pattern' is the tool's argument name
 from hue_bulb import MAX_FADE_MS, HueBulb, parse_color
 from hue_config import load_address
+from library import Library, LibraryError
 
 logging.basicConfig(level=logging.INFO, format="[hue-mcp] %(message)s")  # -> stderr
 log = logging.getLogger("hue-mcp")
 
 bulb = HueBulb(load_address())
-EXAMPLES = Path(__file__).with_name("examples")
+library = Library()
 
 
 class Playing:
@@ -134,6 +135,7 @@ async def set_hue(
 # ── Tool 3: patterns ───────────────────────────────────────────────────────────
 PATTERN_HELP = """
 Play a timed light pattern on the real Hue bulb: changes, waits, fades, nested loops, randomness.
+Give EITHER the name of a saved pattern (see list_hue_patterns) OR the steps themselves.
 It plays in the background and this returns straight away with how long it will take.
 Anything new (another pattern, set_hue, stop_hue_pattern) replaces it immediately.
 
@@ -151,8 +153,12 @@ Example: red for 5 s, fade to green over 1 s, hold 1 s; repeat for a minute; the
            {"wait_ms": 1000}], "for_ms": 60000},
  {"on": false}]
 
-More examples are available as resources: hue://patterns lists them, hue://patterns/{name} has each.
+To keep a pattern for later, use save_hue_pattern. get_hue_pattern shows a saved one's steps,
+which make good starting points for new patterns.
 """
+
+PatternName = Annotated[str, Field(description='A pattern name: lowercase words joined by hyphens, e.g. "forest-railway"')]
+Steps = Annotated[list[dict[str, Any]], Field(description="The list of steps (see play_hue_pattern's description)")]
 
 
 async def _play(steps: list[patterns.Step]) -> None:
@@ -168,21 +174,30 @@ async def _play(steps: list[patterns.Step]) -> None:
 
 @mcp.tool(title="Play a Hue pattern", description=PATTERN_HELP)
 async def play_hue_pattern(
-    pattern: Annotated[list[dict[str, Any]], Field(description="The list of steps (see the tool description)")],
-    name: Annotated[str, Field(description="A short name for the pattern, shown by get_hue")] = "pattern",
+    name: Annotated[str | None, Field(description=
+        "The name of a saved pattern to play; or, with steps, a label for them shown by get_hue")] = None,
+    pattern: Annotated[list[dict[str, Any]] | None, Field(description="The steps, if not playing a saved pattern")] = None,
 ) -> str:
     # Steps nest (loops hold steps), so the schema only says "a list of objects" and the real
     # checking happens in pattern.parse, whose errors say exactly which step is wrong.
+    if pattern is None:
+        if not name:
+            raise ToolError("Give the name of a saved pattern, or the steps to play.")
+        try:
+            pattern = library.get(name).pattern
+        except LibraryError as err:
+            raise ToolError(f"Nothing played: {err}")
     try:
         steps = patterns.parse(pattern, check_color=parse_color)
     except patterns.PatternError as err:
         raise ToolError(f"Nothing played: {err}")
     stopped = await Playing.stop()
-    Playing.name, Playing.summary, Playing.error = name, patterns.describe(steps), ""
+    Playing.name, Playing.summary, Playing.error = name or "pattern", patterns.describe(steps), ""
     Playing.started = asyncio.get_running_loop().time()
     Playing.task = asyncio.create_task(_play(steps))
-    log.info("playing %r: %s", name, Playing.summary)
-    return f"Playing {name!r}: it {Playing.summary}." + (" (Replaced the pattern that was playing.)" if stopped else "")
+    log.info("playing %r: %s", Playing.name, Playing.summary)
+    return (f"Playing {Playing.name!r}: it {Playing.summary}."
+            + (" (Replaced the pattern that was playing.)" if stopped else ""))
 
 
 @mcp.tool(title="Stop the Hue pattern", annotations=ToolAnnotations(idempotentHint=True))
@@ -191,21 +206,76 @@ async def stop_hue_pattern() -> str:
     return f"Stopped {Playing.name!r}." if await Playing.stop() else "No pattern was playing."
 
 
-# ── Resources: the example patterns ────────────────────────────────────────────
-@mcp.resource("hue://patterns", title="Example patterns", mime_type="application/json")
-def list_patterns() -> str:
-    """The example patterns: names and what each one shows."""
-    return json.dumps({p.stem: json.loads(p.read_text()).get("description", "")
-                       for p in sorted(EXAMPLES.glob("*.json"))}, indent=2)
+# ── The pattern library ────────────────────────────────────────────────────────
+class PatternInfo(BaseModel):
+    name: str
+    description: str
+    source: str = Field(description='"built-in" (ships with the project) or "yours" (saved by the user)')
 
 
-@mcp.resource("hue://patterns/{name}", title="Example pattern", mime_type="application/json")
-def get_pattern(name: str) -> str:
-    """One example pattern: a description, and the steps to pass to play_hue_pattern."""
-    path = EXAMPLES / f"{name}.json"
-    if path.parent != EXAMPLES or not path.is_file():
-        raise ValueError(f"No example called {name!r}; see hue://patterns")
-    return path.read_text()
+class PatternDetail(PatternInfo):
+    pattern: list[Any] = Field(description="The steps, ready to pass to play_hue_pattern or adapt")
+
+
+@mcp.tool(title="List saved Hue patterns", annotations=ToolAnnotations(readOnlyHint=True))
+def list_hue_patterns() -> list[PatternInfo]:
+    """List the saved light patterns: built-in ones and the user's own, with a one-line description each."""
+    return [PatternInfo(name=e.name, description=e.description,
+                        source=e.source + (" (in place of the built-in one)" if e.overrides_built_in else ""))
+            for e in library.list()]
+
+
+@mcp.tool(title="Show a saved Hue pattern", annotations=ToolAnnotations(readOnlyHint=True))
+def get_hue_pattern(name: PatternName) -> PatternDetail:
+    """Show a saved pattern's description and steps, e.g. to explain it or as a starting point for a new one."""
+    try:
+        e = library.get(name)
+    except LibraryError as err:
+        raise ToolError(str(err))
+    return PatternDetail(name=e.name, description=e.description, source=e.source, pattern=e.pattern)
+
+
+@mcp.tool(title="Save a Hue pattern", annotations=ToolAnnotations(idempotentHint=True))
+def save_hue_pattern(
+    name: PatternName,
+    description: Annotated[str, Field(description="One line saying what it looks like (up to 200 characters)")],
+    pattern: Steps,
+    replace: Annotated[bool, Field(description=
+        "Set true to update a pattern that already exists, or to save your own version of a built-in one")] = False,
+) -> str:
+    """
+    Save a light pattern under a name, to play later with play_hue_pattern(name=...).
+    The steps are checked first, so a saved pattern always plays. It is saved to the user's own
+    patterns; built-in ones are never changed.
+    """
+    try:
+        return library.save(name, description, pattern, replace, check_color=parse_color)
+    except (LibraryError, patterns.PatternError) as err:
+        raise ToolError(f"Not saved: {err}")
+
+
+@mcp.tool(title="Delete a saved Hue pattern", annotations=ToolAnnotations(destructiveHint=True))
+def delete_hue_pattern(name: PatternName) -> str:
+    """Delete one of the user's saved patterns. Built-in patterns can't be deleted."""
+    try:
+        return library.delete(name)
+    except LibraryError as err:
+        raise ToolError(f"Not deleted: {err}")
+
+
+# Resources: the same library as readable documents, for clients that let the user attach them.
+@mcp.resource("hue://patterns", title="Hue patterns", mime_type="application/json")
+def patterns_resource() -> str:
+    """All saved patterns: name, description and where each comes from."""
+    return json.dumps([{"name": e.name, "description": e.description, "source": e.source}
+                       for e in library.list()], indent=2)
+
+
+@mcp.resource("hue://patterns/{name}", title="Hue pattern", mime_type="application/json")
+def pattern_resource(name: str) -> str:
+    """One saved pattern: its description and steps."""
+    e = library.get(name)  # raises LibraryError (a ValueError) for bad or unknown names
+    return json.dumps({"name": e.name, "description": e.description, "pattern": e.pattern}, indent=2)
 
 
 if __name__ == "__main__":

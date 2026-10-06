@@ -3,12 +3,13 @@
 # dependencies = ["bleak>=3,<4", "webcolors>=25"]
 # ///
 """
-Play a pattern file from the command line, without Claude or MCP.
+Play a pattern from the command line, without Claude or MCP.
 
-    uv run play.py examples/candle.json                 # simulated: prints a timeline, in real time
-    uv run play.py examples/pomodoro.json --fast        # simulated, instantly (good for checking)
-    uv run play.py examples/sunrise.json --light lamp   # the on-screen lamp from ../mcp-lamp
-    uv run play.py examples/breathing.json --light hue  # the real bulb
+    uv run play.py candle                         # a saved pattern, simulated: prints a timeline
+    uv run play.py pomodoro --fast                # simulated, instantly (good for checking)
+    uv run play.py sunrise --light lamp           # the on-screen lamp from ../mcp-lamp
+    uv run play.py breathing --light hue          # the real bulb
+    uv run play.py some/file.json                 # a pattern file that isn't in the library
 
 A pattern file is either a list of steps, or {"description": "...", "pattern": [steps]}.
 The format is described at the top of pattern.py and in the README. Ctrl-C stops.
@@ -23,11 +24,20 @@ from pathlib import Path
 
 import pattern
 from hue_bulb import parse_color
+from library import Library, LibraryError
 from lights import LampLight, SimLight
 
 
-def load(path: str) -> tuple[str, list]:
-    data = json.loads(Path(path).read_text())
+def load(name_or_path: str) -> tuple[str, list]:
+    """A pattern from the library by name, or from a JSON file by path."""
+    path = Path(name_or_path)
+    if path.suffix != ".json" and not path.exists():
+        try:
+            entry = Library().get(name_or_path)
+        except LibraryError as err:
+            sys.exit(str(err))
+        return entry.description, entry.pattern
+    data = json.loads(path.read_text())
     if isinstance(data, dict):
         return data.get("description", ""), data.get("pattern")
     return "", data
@@ -35,7 +45,7 @@ def load(path: str) -> tuple[str, list]:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("file")
+    parser.add_argument("file", metavar="pattern", help="a saved pattern's name, or a .json file")
     parser.add_argument("--light", choices=["sim", "lamp", "hue"], default="sim")
     parser.add_argument("--fast", action="store_true", help="simulated only: skip the waiting")
     parser.add_argument("--limit", type=float, help="stop after this many seconds (default with --fast: one day)")
@@ -52,7 +62,7 @@ async def main() -> None:
 
     clock = pattern.FakeClock() if args.fast else pattern.RealClock()
     limit_s = args.limit or (86400 if args.fast else None)
-    print(f"{Path(args.file).name}: {description or ''}\n  {pattern.describe(steps)}"
+    print(f"{Path(args.file).stem}: {description or ''}\n  {pattern.describe(steps)}"
           + (f" (stopping after {args.limit:g} s)" if args.limit else ""))
 
     bulb = None

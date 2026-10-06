@@ -69,7 +69,7 @@ def test_nesting_and_size_limits():
 
 
 def test_examples_are_valid():
-    for path in Path(__file__).with_name("examples").glob("*.json"):
+    for path in Path(__file__).with_name("patterns").glob("*.json"):
         parse(json.loads(path.read_text())["pattern"])
 
 
