@@ -24,7 +24,7 @@ simulated light that just prints a timeline (lights.py). The format, with an exa
   even halfway through a wait.
 - Numbers that can vary (wait_ms, fade_ms, brightness, times) take {"min": a, "max": b} for a
   random value, picked afresh each time the step runs. Random counts are inclusive.
-- Without fade_ms the bulb does its short built-in fade, but the pattern moves straight on.
+- Without fade_ms the change is instant.
 - "black" or brightness 0 is dark; any other colour or brightness lights the bulb again
   (that is the light's job: see hue_bulb.plan_writes).
 - Every loop body must take some time (a change, a wait or a fade), so nothing can spin.

@@ -112,7 +112,7 @@ async def set_hue(
         "Brightness, 1-100 percent; 0 means dark")] = None,
     fade_ms: Annotated[int | None, Field(ge=0, le=MAX_FADE_MS, description=
         "How long the bulb takes to fade to the new values, in ms (100 ms steps, up to ~1 h 49 min). "
-        "0 is instant; leave out for the bulb's own ~0.4 s fade.")] = None,
+        "Leave out (or 0) for an instant change.")] = None,
 ) -> HueResult:
     """
     Change the real Philips Hue bulb in the user's room. Any field you leave out stays as it is.

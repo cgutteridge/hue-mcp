@@ -118,7 +118,7 @@ def raw_to_percent(raw: int) -> int:
 REC_POWER, REC_BRIGHTNESS, REC_MIREDS, REC_XY, REC_FADE = 1, 2, 3, 4, 5
 FADE_UNIT_MS = 100                          # the fade time is counted in 100 ms steps
 MAX_FADE_MS = 65535 * FADE_UNIT_MS          # 2 bytes: just under 1 h 50 min
-DEFAULT_FADE_MS = 400                       # the bulb's own fade when none is given (measured ~360 ms)
+DEFAULT_FADE_MS = 0                         # instant unless asked; left out, the bulb fades ~0.4 s itself
 
 RECORD_FOR_CHAR = {POWER_CHAR: REC_POWER, BRIGHTNESS_CHAR: REC_BRIGHTNESS,
                    TEMPERATURE_CHAR: REC_MIREDS, COLOR_CHAR: REC_XY}
@@ -252,7 +252,7 @@ class HueBulb:
         writes = plan_writes(on, color, brightness)  # raises before anything is sent
         if not writes:
             return
-        packet = encode_records(writes, fade_ms)
+        packet = encode_records(writes, DEFAULT_FADE_MS if fade_ms is None else fade_ms)
 
         async def write(client: BleakClient) -> None:
             try:

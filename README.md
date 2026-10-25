@@ -73,7 +73,7 @@ Light-control service `932c32bd-0000-47a2-835a-a8d455b859dd`. Characteristics ar
 | Connecting | ~6 s, which is why the server keeps one connection open |
 | One acknowledged write | ~60 ms, so ~15 changes a second at most |
 | One read | ~90 ms. Reading 0007 gets the whole state in one go |
-| The bulb's own fade | ~0.36 s for any change |
+| The bulb's own fade | ~0.36 s for any change, unless the write gives a fade time (we send 0 by default, so changes are instant) |
 | **Writing 0007** | One packet changes several things at once. Add a record of **type 5, 2 bytes LE: the fade time in 100 ms units**, and the bulb fades smoothly by itself: a requested 3 s fade took 2.9 s. (Sending 3000, meaning milliseconds, gave a 5-minute fade.) |
 | Timing done on the Mac | Steps 400 ms apart landed 40–60 ms late (one write), with no build-up |
 
@@ -148,7 +148,7 @@ Privacy & Security → Bluetooth). Logs: `~/Library/Logs/Claude/mcp-server-hue.l
 
 | Step | Looks like | Notes |
 |---|---|---|
-| change | `{"color": "red", "brightness": 80, "fade_ms": 1000}` | any of `on`, `color`, `brightness` (as in `set_hue`), optional `fade_ms`. A fade holds the pattern until it's done; without `fade_ms` the pattern moves straight on |
+| change | `{"color": "red", "brightness": 80, "fade_ms": 1000}` | any of `on`, `color`, `brightness` (as in `set_hue`), optional `fade_ms`. A fade holds the pattern until it's done; without `fade_ms` the change is instant |
 | wait | `{"wait_ms": 5000}` | |
 | loop | `{"loop": [steps], "times": 3}` | `times`: a count, `{"min", "max"}` or `"forever"`; and/or `for_ms`: a time limit. With both, whichever comes first |
 
