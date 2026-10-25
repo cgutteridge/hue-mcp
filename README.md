@@ -279,3 +279,7 @@ CLAUDE.md           the original brief
 ```
 
 Built with the MCP Python SDK v2 (`mcp`), `bleak` 3 and `webcolors`.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
