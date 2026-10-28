@@ -166,9 +166,9 @@ PatternName = Annotated[str, Field(description='A pattern name: lowercase words 
 Steps = Annotated[list[dict[str, Any]], Field(description="The list of steps (see play_hue_pattern's description)")]
 
 
-async def _play(steps: list[patterns.Step]) -> None:
+async def _play(steps: list[patterns.Step], start_offset_ms: int = 0) -> None:
     try:
-        await patterns.Player(bulb).play(steps)
+        await patterns.Player(bulb, start_offset_ms=start_offset_ms).play(steps)
         log.info("pattern %r finished", Playing.name)
     except asyncio.CancelledError:
         raise
@@ -182,6 +182,12 @@ async def play_hue_pattern(
     name: Annotated[str | None, Field(description=
         "The name of a saved pattern to play; or, with steps, a label for them shown by get_hue")] = None,
     pattern: Annotated[list[dict[str, Any]] | None, Field(description="The steps, if not playing a saved pattern")] = None,
+    start_offset_ms: Annotated[int, Field(ge=0, le=24 * 3600 * 1000, description=
+        "Join the pattern this far in, as if it had been playing that long: the bulb goes straight to "
+        "where the pattern would be, then plays on. For syncing a long pattern to something else, "
+        "e.g. a game clock. Random choices in the skipped part are not replayed, so a flicker you "
+        "join mid-way won't match an earlier run. Past the end of a pattern that finishes, the bulb "
+        "just takes the pattern's final state.")] = 0,
 ) -> str:
     # Steps nest (loops hold steps), so the schema only says "a list of objects" and the real
     # checking happens in pattern.parse, whose errors say exactly which step is wrong.
@@ -199,9 +205,9 @@ async def play_hue_pattern(
     stopped = await Playing.stop()
     Playing.name, Playing.summary, Playing.error = name or "pattern", patterns.describe(steps), ""
     Playing.started = asyncio.get_running_loop().time()
-    Playing.task = asyncio.create_task(_play(steps))
-    log.info("playing %r: %s", Playing.name, Playing.summary)
-    return (f"Playing {Playing.name!r}: it {Playing.summary}."
+    Playing.task = asyncio.create_task(_play(steps, start_offset_ms))
+    log.info("playing %r from %d ms in: %s", Playing.name, start_offset_ms, Playing.summary)
+    return (f"Playing {Playing.name!r}{f' from {start_offset_ms / 1000:g} s in' if start_offset_ms else ''}: it {Playing.summary}."
             + (" (Replaced the pattern that was playing.)" if stopped else ""))
 
 

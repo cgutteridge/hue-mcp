@@ -257,6 +257,33 @@ class _TimeUp(Exception):
         self.deadline = deadline
 
 
+def _is_black(color: str) -> bool:
+    """Black means dark (see hue_bulb.is_black; repeated here to keep this file light-agnostic)."""
+    return color.strip().lower() in ("black", "#000", "#000000")
+
+
+@dataclass
+class _Seen:
+    """What the skipped start of a pattern last set, so the light can be put straight there."""
+    color: str | None = None
+    brightness: int | None = None
+    dark: bool | None = None    # None: the skipped part never said
+
+    def note(self, step: Change) -> None:
+        if step.on is not None:
+            self.dark = not step.on
+        if step.color is not None:
+            if _is_black(step.color):
+                self.dark = True
+            else:
+                self.color, self.dark = step.color, False
+        if step.brightness is not None:
+            if step.brightness[1] == 0:
+                self.dark = True
+            else:
+                self.brightness, self.dark = step.brightness[1], False
+
+
 @dataclass
 class Player:
     """
@@ -267,6 +294,12 @@ class Player:
     A big delay is different: if a change goes out more than LATE_MS late (say the bulb took
     6 s to reconnect), rushing to catch up would squash the next part of the pattern. Instead the
     whole timeline, loop time limits included, shifts back by the delay (self.shift).
+
+    start_offset_ms joins the pattern that far in. The timeline runs ahead without sleeping or
+    sending (random choices are still made), then the light is put where the pattern had it and
+    play carries on in real time. A fade that was under way is joined part-way: it starts from
+    the earlier state with only its remaining time. A pattern shorter than the offset just ends
+    in its final state.
     """
     light: Light
     clock: Any = field(default_factory=RealClock)
@@ -275,24 +308,46 @@ class Player:
     last_send: float = -math.inf
     changes_sent: int = 0
     shift: float = 0.0  # seconds the timeline has been pushed back by late sends
+    start_offset_ms: float = 0
+    seek_until: float | None = field(default=None, init=False)  # timeline time to arrive at; None once there
+    _seen: _Seen = field(default_factory=_Seen, init=False, repr=False)
 
     async def play(self, steps: list[Step], limit_ms: float | None = None) -> None:
         self.t = self.clock.now()
-        deadline = self.t + limit_ms / 1000 if limit_ms else math.inf
+        deadline = self.t + (limit_ms + self.start_offset_ms) / 1000 if limit_ms else math.inf  # limit_ms counts played time
+        if self.start_offset_ms > 0:
+            self.seek_until = self.t + self.start_offset_ms / 1000
+            self.shift = -self.start_offset_ms / 1000  # so the arrival point lines up with now
         try:
             await self._steps(steps, deadline)
         except _TimeUp:
             pass
+        if self.seek_until is not None:
+            await self._arrive()  # the pattern ended before the offset: show its last state
         await self.clock.sleep_until(self.t + self.shift)  # let a final wait or fade run its course
 
     def _pick(self, r: Range | None) -> int | None:
         return None if r is None else self.rng.randint(*r)
 
-    def _advance(self, ms: float, deadline: float) -> None:
-        self.t += ms / 1000
+    async def _advance(self, ms: float, deadline: float) -> None:
+        self.t = min(self.t + ms / 1000, deadline)
+        if self.seek_until is not None:
+            await asyncio.sleep(0)  # a long skip stays cancellable
+            if self.t >= self.seek_until:
+                await self._arrive()
         if self.t >= deadline:
-            self.t = deadline
             raise _TimeUp(deadline)
+
+    async def _arrive(self) -> None:
+        """The timeline has reached the start offset: put the light where the pattern had it."""
+        seen, resume = self._seen, self.t
+        self.t, self.seek_until = self.seek_until, None
+        if seen.dark:
+            await self._write(False, None, None, None)
+        elif seen.dark is False:
+            bare_on = seen.color is None and seen.brightness is None
+            await self._write(True if bare_on else None, seen.color, seen.brightness, None)
+        self.t = max(self.t, resume)
 
     async def _steps(self, steps: list[Step], deadline: float) -> None:
         for step in steps:
@@ -301,23 +356,50 @@ class Player:
             if isinstance(step, Change):
                 await self._change(step, deadline)
             elif isinstance(step, Wait):
-                self._advance(self._pick(step.ms), deadline)
+                await self._advance(self._pick(step.ms), deadline)
             else:
                 await self._loop(step, deadline)
 
+    def _skip(self, step: Change, deadline: float) -> Change | None:
+        """
+        While skipping to the start offset: remember a change instead of sending it. Returns None
+        when handled, or, for a fade that straddles the offset, the change to send with only its
+        remaining fade (after the light has been put where the pattern had it).
+        """
+        fade = self._pick(step.fade_ms) or 0
+        brightness = self._pick(step.brightness)
+        end = self.t + fade / 1000
+        if end <= self.seek_until or self.seek_until >= deadline:
+            self._seen.note(Change(step.on, step.color, None if brightness is None else (brightness, brightness)))
+            self.t = end
+            return None
+        self.t = self.seek_until
+        return Change(step.on, step.color, None if brightness is None else (brightness, brightness),
+                      (round((end - self.seek_until) * 1000),) * 2)
+
     async def _change(self, step: Change, deadline: float) -> None:
+        if self.seek_until is not None:
+            step = self._skip(step, deadline)
+            if step is None:
+                await self._advance(0, deadline)  # arrives here if this change ended exactly on the offset
+                return
+            await self._arrive()
         self.t = max(self.t, self.last_send + MIN_GAP_MS / 1000)  # the rate limit
         if self.t >= deadline:
             self.t = deadline
             raise _TimeUp(deadline)
-        await self.clock.sleep_until(self.t + self.shift)
         fade = self._pick(step.fade_ms)
-        await self.light.apply(step.on, step.color, self._pick(step.brightness), fade)
+        await self._write(step.on, step.color, self._pick(step.brightness), fade)
+        await self._advance(fade or 0, deadline)  # a fade holds the pattern until it's done
+
+    async def _write(self, on, color, brightness, fade) -> None:
+        """Send one change, due at the timeline's t, and do the bookkeeping."""
+        await self.clock.sleep_until(self.t + self.shift)
+        await self.light.apply(on, color, brightness, fade)
         late = self.clock.now() - (self.t + self.shift)
         if late > LATE_MS / 1000:
             self.shift += late  # don't rush to catch up: push the rest of the pattern back
         self.last_send, self.changes_sent = self.t, self.changes_sent + 1
-        self._advance(fade or 0, deadline)  # a fade holds the pattern until it's done
 
     async def _loop(self, step: Loop, deadline: float) -> None:
         own = self.t + step.for_ms / 1000 if step.for_ms is not None else math.inf

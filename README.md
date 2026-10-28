@@ -160,6 +160,12 @@ Privacy & Security → Bluetooth). Logs: `~/Library/Logs/Claude/mcp-server-hue.l
   (inclusive), picked afresh each time the step runs.
 - **Time limits cut through:** a loop's `for_ms` stops everything inside it, even an inner loop
   halfway through a wait, and the pattern carries on after that loop.
+- **Joining part-way:** `start_offset_ms` plays a pattern as if it had already been running that
+  long (e.g. to sync a long pattern to a game clock). The player runs the timeline ahead without
+  sending anything, puts the bulb where the pattern had it, then carries on in real time. A fade
+  under way is joined with only its remaining time, and a forever-loop wraps round. Random choices
+  in the skipped part are made but not replayed, so a flicker joined mid-way differs from an
+  earlier run.
 - **New replaces old:** another pattern, `set_hue` or `stop_hue_pattern` stops the current pattern
   at once.
 - **Safe by construction:** the whole pattern is checked before anything plays, and errors say which

@@ -177,3 +177,63 @@ def test_small_delays_do_not_shift_the_timeline():
     light = SlightlySlowLight(clock)
     asyncio.run(Player(light, clock).play(parse([{"color": "red"}, {"wait_ms": 1000}, {"color": "blue"}])))
     assert [round(t, 2) for t, *_ in light.log] == [0.06, 1.06]  # each due on time; no drift added
+
+
+# ── Joining a pattern part-way in (start_offset_ms) ────────────────────────────
+
+def run_from(data, offset_ms, limit_ms=None, seed=0):
+    clock = FakeClock()
+    light = RecordingLight(clock)
+    asyncio.run(Player(light, clock, random.Random(seed), start_offset_ms=offset_ms).play(parse(data), limit_ms))
+    return light.log, round(clock.now(), 3)
+
+
+STEPS = [{"color": "red"}, {"wait_ms": 5000}, {"color": "green"}, {"wait_ms": 5000}, {"color": "blue"}]
+
+
+def test_offset_puts_the_light_where_the_pattern_was_then_plays_on():
+    log, end = run_from(STEPS, 7000)
+    assert log == [(0.0, None, "green", None, None), (3.0, None, "blue", None, None)]
+    assert end == 3.0
+
+
+def test_offset_zero_is_the_normal_pattern():
+    assert run_from(STEPS, 0) == run(STEPS)
+
+
+def test_offset_joins_a_fade_part_way():
+    data = [{"color": "red"}, {"wait_ms": 1000}, {"color": "green", "fade_ms": 4000}, {"wait_ms": 1000}, {"color": "blue"}]
+    log, _ = run_from(data, 3000)
+    # red where it was; then green fading over the 2 s that were left (70 ms later: the rate limit)
+    assert log[:2] == [(0.0, None, "red", None, None), (0.07, None, "green", None, 2000)]
+    assert log[2][2] == "blue" and log[2][0] == pytest.approx(3.07)
+
+
+def test_offset_into_darkness_switches_off():
+    data = [{"color": "red"}, {"wait_ms": 1000}, {"color": "black"}, {"wait_ms": 1000}, {"color": "blue"}]
+    assert run_from(data, 1500)[0][0] == (0.0, False, None, None, None)
+    assert run_from(data, 500)[0][0] == (0.0, None, "red", None, None)
+
+
+def test_offset_wraps_round_a_forever_loop():
+    data = [{"loop": [{"color": "red"}, {"wait_ms": 1000}, {"color": "blue"}, {"wait_ms": 1000}], "times": "forever"}]
+    log, _ = run_from(data, 5500, limit_ms=1600)  # 5.5 s in is the middle of a blue
+    assert [(t, c) for t, _, c, _, _ in log] == [(0.0, "blue"), (0.5, "red"), (1.5, "blue")]
+
+
+def test_offset_respects_loop_time_limits():
+    # the loop's own 2 s limit ended before the offset, so the light stays as the loop left it
+    data = [{"loop": [{"color": "red"}, {"wait_ms": 500}, {"color": "blue"}, {"wait_ms": 5000}], "for_ms": 2000},
+            {"wait_ms": 4000}, {"color": "green"}]
+    log, _ = run_from(data, 3000)
+    assert log == [(0.0, None, "blue", None, None), (3.0, None, "green", None, None)]
+
+
+def test_offset_past_the_end_shows_the_final_state():
+    log, end = run_from([{"color": "red"}, {"wait_ms": 1000}, {"color": "blue"}], 99999)
+    assert log == [(0.0, None, "blue", None, None)] and end == 0.0
+
+
+def test_offset_keeps_random_choices_deterministic():
+    data = [{"loop": [{"brightness": {"min": 10, "max": 90}}, {"wait_ms": {"min": 100, "max": 900}}], "times": 200}]
+    assert run_from(data, 60000, seed=3) == run_from(data, 60000, seed=3)
